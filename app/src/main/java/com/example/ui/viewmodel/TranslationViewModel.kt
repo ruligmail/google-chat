@@ -25,6 +25,53 @@ class TranslationViewModel(
     private val repository: TranslationRepository
 ) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
+    // Google User Model for dynamic sign in representation
+    data class GoogleUser(
+        val email: String,
+        val displayName: String,
+        val photoUrl: String? = null
+    )
+
+    private val sharedPrefs = application.getSharedPreferences("duotrans_prefs", android.content.Context.MODE_PRIVATE)
+
+    private val _currentUser = MutableStateFlow<GoogleUser?>(null)
+    val currentUser = _currentUser.asStateFlow()
+
+    fun signInWithGoogle(email: String, displayName: String) {
+        viewModelScope.launch {
+            sharedPrefs.edit().apply {
+                putString("user_email", email)
+                putString("user_name", displayName)
+                apply()
+            }
+            _currentUser.value = GoogleUser(email, displayName)
+            
+            // Also automatically modify the default/active room to map Alice:en to user:en to make chat transition personalized!
+            try {
+                val rooms = repository.getAllChatRoomsList()
+                for (room in rooms) {
+                    if (room.participantsString.contains("Alice:en")) {
+                        val updated = room.participantsString.replace("Alice:en", "$displayName:en")
+                        repository.updateChatRoomParticipants(room.id, updated)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TranslationViewModel", "Auto-updating participant name failed", e)
+            }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            sharedPrefs.edit().apply {
+                remove("user_email")
+                remove("user_name")
+                apply()
+            }
+            _currentUser.value = null
+        }
+    }
+
     // Language list definition
     val availableLanguages = listOf(
         LanguageItem("English", "en", Locale.US),
@@ -127,7 +174,18 @@ class TranslationViewModel(
     private var isTtsInitialized = false
 
     init {
-        tts = TextToSpeech(application, this)
+        // Load custom user session on start
+        val savedEmail = sharedPrefs.getString("user_email", null)
+        val savedName = sharedPrefs.getString("user_name", null)
+        if (savedEmail != null && savedName != null) {
+            _currentUser.value = GoogleUser(savedEmail, savedName)
+        }
+
+        try {
+            tts = TextToSpeech(application, this)
+        } catch (e: Exception) {
+            Log.e("TranslationViewModel", "Failed to initialize TextToSpeech", e)
+        }
         
         // Load chat rooms, if none exist, pre-populate default space and direct message
         viewModelScope.launch {
@@ -274,9 +332,13 @@ class TranslationViewModel(
         val languageItem = availableLanguages.firstOrNull { it.name.equals(langName, ignoreCase = true) }
         val locale = languageItem?.locale ?: Locale.US
 
-        tts?.apply {
-            language = locale
-            speak(text, TextToSpeech.QUEUE_FLUSH, null, "TranslationSpeechID")
+        try {
+            tts?.apply {
+                language = locale
+                speak(text, TextToSpeech.QUEUE_FLUSH, null, "TranslationSpeechID")
+            }
+        } catch (e: Exception) {
+            Log.e("TranslationViewModel", "TTS playback failed", e)
         }
     }
 
@@ -348,10 +410,16 @@ class TranslationViewModel(
             val rooms = repository.getAllChatRoomsList()
             val room = rooms.firstOrNull { it.id == activeId } ?: return@launch
             val currentParts = room.participantsString
+            
+            // Split by comma in case multiple nicknames/emails are entered at once
+            val nicknamesList = nickname.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            if (nicknamesList.isEmpty()) return@launch
+            
+            val addedSegment = nicknamesList.joinToString(",") { "$it:${lang.code}" }
             val updatedParts = if (currentParts.isBlank()) {
-                "${nickname}:${lang.code}"
+                addedSegment
             } else {
-                "${currentParts},${nickname}:${lang.code}"
+                "${currentParts},$addedSegment"
             }
             repository.updateChatRoomParticipants(activeId, updatedParts)
         }
@@ -440,9 +508,13 @@ class TranslationViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        tts?.apply {
-            stop()
-            shutdown()
+        try {
+            tts?.apply {
+                stop()
+                shutdown()
+            }
+        } catch (e: Exception) {
+            Log.e("TranslationViewModel", "TTS shutdown failed", e)
         }
     }
 }

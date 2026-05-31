@@ -51,6 +51,15 @@ fun TranslationScreen(
     val isTranslatingGroup by viewModel.isTranslatingGroup.collectAsState()
     val errorState by viewModel.errorState.collectAsState()
     val glossaryTerms by viewModel.glossaryTerms.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+
+    if (currentUser == null) {
+        GmailLoginScreen(
+            viewModel = viewModel,
+            modifier = modifier
+        )
+        return
+    }
 
     var showGlossarySheet by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
@@ -80,8 +89,14 @@ fun TranslationScreen(
                 modifier = Modifier.width(320.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
-                // Workspace Drawer Header
                 Column(
+                    modifier = Modifier.fillMaxHeight()
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        // Workspace Drawer Header
+                        Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
@@ -268,6 +283,67 @@ fun TranslationScreen(
                         }
                     }
                 }
+                } // Close Column(modifier = Modifier.weight(1f))
+
+                // Bottom Profile / Sign Out Card (Google account integration details)
+                currentUser?.let { user ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Avatar
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = user.displayName.take(1).uppercase(),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 16.sp
+                            )
+                        }
+
+                        // Username & Email details
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = user.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = user.email,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Sign out icon button
+                        IconButton(
+                            onClick = {
+                                viewModel.signOut()
+                            },
+                            modifier = Modifier.testTag("google_sign_out_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Logout,
+                                contentDescription = "Sign Out",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+                } // Close Column(modifier = Modifier.fillMaxHeight())
             }
         }
     ) {
@@ -1343,9 +1419,9 @@ fun AddGroupMemberDialog(
                 OutlinedTextField(
                     value = nickname,
                     onValueChange = { nickname = it },
-                    label = { Text("Nickname") },
-                    placeholder = { Text("e.g. Kenji") },
-                    maxLines = 1,
+                    label = { Text("Nickname(s) or Email(s)") },
+                    placeholder = { Text("e.g. a@gmail.com, b@gmail.com") },
+                    maxLines = 3,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("add_member_nickname_input")
@@ -1534,8 +1610,9 @@ fun CreateChatRoomDialog(
                             OutlinedTextField(
                                 value = draftNickname,
                                 onValueChange = { draftNickname = it },
-                                label = { Text("Add Participant Name") },
-                                singleLine = true,
+                                label = { Text("Add Name(s) / Email(s)") },
+                                placeholder = { Text("e.g. a@gmail.com, b@gmail.com") },
+                                maxLines = 3,
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("new_chat_member_nickname")
@@ -1578,15 +1655,17 @@ fun CreateChatRoomDialog(
                         Button(
                             onClick = {
                                 if (draftNickname.isNotBlank()) {
-                                    val trimmedNick = draftNickname.trim()
-                                    if (!draftedMembers.any { it.id == trimmedNick }) {
-                                        draftedMembers.add(
-                                            TranslationViewModel.ChatMember(
-                                                id = trimmedNick,
-                                                nickname = trimmedNick,
-                                                language = draftSelectedLang
+                                    val parts = draftNickname.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                                    for (trimmedNick in parts) {
+                                        if (!draftedMembers.any { it.id == trimmedNick }) {
+                                            draftedMembers.add(
+                                                TranslationViewModel.ChatMember(
+                                                    id = trimmedNick,
+                                                    nickname = trimmedNick,
+                                                    language = draftSelectedLang
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                     draftNickname = ""
                                 }
