@@ -1,0 +1,6 @@
+{
+  "name": "Dual Conversation Translator",
+  "description": "Face-to-face bilingual conversation translator with contextual alternative suggestions and localized glossary retrieval-augmented generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
